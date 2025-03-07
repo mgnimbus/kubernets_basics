@@ -6,6 +6,7 @@ https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands
 
 https://kubernetes.io/docs/reference/kubectl/conventions/
 
+https://kubernetes.io/docs/reference/generated/kubectl/kubectl-commands#-strong-getting-started-strong-
 To set an alias in new env
 ```
 alias k=kubectl
@@ -179,23 +180,7 @@ spec:
       # By default and for convenience, the `targetPort` is set to
       # the same value as the `port` field.
       # where the application is exposed in pod
-      targetPort: 80
-      # Optional field
-      # By default and for convenience, the Kubernetes control plane
-      # will allocate a port from a range (default: 30000-32767)
-      nodePort: 30007
-```
-Simple NodePort svc
-
-```yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: myapp-svc
-  labels:
-    tier: myapp-frnd-svc
-spec:
-  type: NodePort
+      targetPort: 80We can also use the label selector to filter the required pods
   ports:
     - targetPort: 80
       port: 80
@@ -360,6 +345,27 @@ k run pod nginx --image=nginx -n dev
 
 k create deploy nginx --image=nginx
 
+k run redis --image=redis:alpine --labels tier=db
+k run redis --image=redis:alpine --labels='tier=db,name=test'
+
+
+# We can list the all pod labels using this command
+
+k describe po --show-labels
+
+# We can also use the label selector to filter the required pods
+kubectl get pods -l env=test
+
+kubectl create service clusterip NAME [--tcp=<port>:<targetPort>] [--dry-run=server|client|none]
+kubectl create service clusterip redis-service --tcp=6379:6379
+
+k create deploy webapp --image=kodekloud/webapp-color --replicas=3
+
+$ kubectl run NAME --image=image [--env="key=value"] [--port=port] [--dry-run=server|client] [--overrides=inline-json] [--command] -- [COMMAND] [args...]
+
+k run nginx --image=nginx --port=80 
+k run nginx --image=nginx --port=80  --expose=true --labels='app=http,tier=frontend,env=dev'
+
 ```
 ### Update Objects
 
@@ -460,7 +466,8 @@ kubectl expose pod redis --port=6379 --name redis-service --dry-run=client -o ya
 
 Or
 
-kubectl create service clusterip redis --tcp=6379:6379 --dry-run=client -o yaml (This will not use the pods labels as selectors, instead it will assume selectors as app=redis. You cannot pass in selectors as an option. So it does not work very well if your pod has a different label set. So generate the file and modify the selectors before creating the service)
+kubectl create service clusterip redis --tcp=6379:6379 --dry-run=client -o yaml (This will not use the pods labels as selectors, instead it will assume selectors as app=redis. You cannot pass in selectors as an option. 
+So it does not work very well if your pod has a different label set. So generate the file and modify the selectors before creating the service)
 
 
 Create a Service named nginx of type NodePort to expose pod nginx's port 80 on port 30080 on the nodes:
@@ -475,5 +482,39 @@ kubectl create service nodeport nginx --tcp=80:80 --node-port=30080 --dry-run=cl
 ```
 (This will not use the pods labels as selectors)
 
-Both the above commands have their own challenges. While one of it cannot accept a selector the other cannot accept a node port. I would recommend going with the kubectl expose command. If you need to specify a node port, generate a definition file using the same command and manually input the nodeport before creating the service.
+Both the above commands have their own challenges. While one of it cannot accept a selector the other cannot accept a node port. I would recommend going with the kubectl expose command. 
+If you need to specify a node port, generate a definition file using the same command and manually input the nodeport before creating the service.
 
+
+# Kubernetes Scheduler
+
+In Kubernetes, scheduling refers to making sure that Pods are matched to Nodes so that Kubelet can run them.A scheduler watches for newly created Pods that have no Node assigned. 
+For every Pod that the scheduler discovers, the scheduler becomes responsible for finding the best Node for that Pod to run on. The scheduler reaches this placement decision taking into account the scheduling principles described below.
+
+kube-scheduler is the default scheduler for Kubernetes and runs as part of the control plane. kube-scheduler is designed so that,  if you want and need to, you can write your own scheduling component and use that instead.
+
+Kube-scheduler selects an optimal node to run newly created or not yet scheduled (unscheduled) pods. Since containers in pods - and pods themselves - can have different requirements, the scheduler filters out any nodes that don't meet a Pod's specific scheduling needs. Alternatively, the API lets you specify a node for a Pod when you create it, but this is unusual and is only done in special cases.
+
+In a cluster, Nodes that meet the scheduling requirements for a Pod are called feasible nodes. If none of the nodes are suitable, the pod remains unscheduled until the scheduler is able to place it.
+
+The scheduler finds feasible Nodes for a Pod and then runs a set of functions to score the feasible Nodes and picks a Node with the highest score among the feasible ones to run the Pod. The scheduler then notifies the API server about this decision in a process called binding.
+
+Factors that need to be taken into account for scheduling decisions include individual and collective resource requirements, hardware / software / policy constraints, affinity and anti-affinity specifications, data locality, inter-workload interference, and so on.
+
+## Node selection in kube-scheduler
+
+kube-scheduler selects a node for the pod in a 2-step operation:
+
+  1. Filtering
+  2. Scoring
+
+The filtering step finds the set of Nodes where it's feasible to schedule the Pod. For example, the PodFitsResources filter checks whether a candidate Node has enough available resources to meet a Pod's specific resource requests. After this step, the node list contains any suitable Nodes; often, there will be more than one. If the list is empty, that Pod isn't (yet) schedulable.
+
+In the scoring step, the scheduler ranks the remaining nodes to choose the most suitable Pod placement. The scheduler assigns a score to each Node that survived filtering, basing this score on the active scoring rules.
+
+Finally, kube-scheduler assigns the Pod to the Node with the highest ranking. If there is more than one node with equal scores, kube-scheduler selects one of these at random.
+
+There are two supported ways to configure the filtering and scoring behavior of the scheduler:
+
+  1. Scheduling Policies allow you to configure Predicates for filtering and Priorities for scoring.
+  2. Scheduling Profiles allow you to configure Plugins that implement different scheduling stages, including: QueueSort, Filter, Score, Bind, Reserve, Permit, and others. You can also configure the kube-scheduler to run different profiles.
