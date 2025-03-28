@@ -518,3 +518,397 @@ There are two supported ways to configure the filtering and scoring behavior of 
 
   1. Scheduling Policies allow you to configure Predicates for filtering and Priorities for scoring.
   2. Scheduling Profiles allow you to configure Plugins that implement different scheduling stages, including: QueueSort, Filter, Score, Bind, Reserve, Permit, and others. You can also configure the kube-scheduler to run different profiles.
+
+
+# Monitoring in k8s
+For Kubernetes, the Metrics API offers a basic set of metrics to support automatic scaling and similar use cases. This API makes information available about resource usage for node and pod, including metrics for CPU and memory. If you deploy the Metrics API into your cluster, clients of the Kubernetes API can then query for this information, and you can use Kubernetes' access control mechanisms to manage permissions to do so.
+
+## Metric Server
+
+Its an In-Memory service and doesnt store on disk as a result you canont see the historical perfomance data
+
+You need to rely on advanced monitoring solution like Prometheus,DataDog or DynaTrace 
+
+Kubernetes runs an agent on each node known as the kubelet, which is responsible for receiving instructions from the Kubernetes API master server and running pods on the nodes. The kubelet also contains a sub component known as the cAdvisor or Container Advisor. cAdvisor is responsible for retrieving performance metrics from pods and exposing them through the kubelet API to make the metrics available for the Metrics Server.
+
+![resource metrics pipeline](image.png)
+
+The architecture components, from right to left in the figure, consist of the following:
+
+    cAdvisor: Daemon for collecting, aggregating and exposing container metrics included in Kubelet.
+
+    kubelet: Node agent for managing container resources. Resource metrics are accessible using the /metrics/resource and /stats kubelet API endpoints.
+
+    node level resource metrics: API provided by the kubelet for discovering and retrieving per-node summarized stats available through the /metrics/resource endpoint.
+
+    metrics-server: Cluster addon component that collects and aggregates resource metrics pulled from each kubelet. The API server serves Metrics API for use by HPA, VPA, and by the kubectl top command. Metrics Server is a reference implementation of the Metrics API.
+
+    Metrics API: Kubernetes API supporting access to CPU and memory used for workload autoscaling. To make this work in your cluster, you need an API extension server that provides the Metrics API.
+
+ ## Metrics API   
+
+ The metrics-server implements the Metrics API. This API allows you to access CPU and memory usage for the nodes and pods in your cluster. Its primary role is to feed resource usage metrics to K8s autoscaler components.
+
+ ```bash
+ minikube addons enable metrics-server
+ ```
+
+For all other environments, deploy the Metrics Server by cloning the Metrics Server deployment files from the GitHub repository, and then deploying the required components using the kubectl create command.
+
+This command deploys a set of pods, services, and roles to enable Metrics Server to pull for performance metrics from the nodes in the cluster.
+
+Once deployed, give the Metrics Server some time to collect and process data.
+
+Once processed, cluster performance can be viewed by running the command kubectl top nod
+
+
+```
+git clone https://github.com/kubernetes-sigs/metrics-server.git
+
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+k create -f deploy/1.8+/
+```
+
+
+## Application Logs
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: event-simulator-pod
+  labels:
+    App: dev
+spec:
+  containers:
+    - name: event-simulator
+      image: kodekloud.event-simulator
+```
+
+```bash
+k logs -f event-simulator-pod
+```
+
+Once the pod is running, we can view the logs using the kubectl logs command with the pod name.
+
+
+## If a Pod has multiple containers then we need to specific which container you need to monitor
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: event-simulator-pod
+  labels:
+    App: dev
+spec:
+  containers:
+    - name: event-simulator
+      image: kodekloud.event-simulator
+    - name: image-processor
+      image: some-image-processor  
+```
+
+```bash
+k logs -f event-simulator-pod event-simulator
+```
+
+If there are multiple containers within a pod, you must specify the name of the container explicitly in the command.
+
+Otherwise it would fail asking you to specify a name. In this case, I will specify the name of the first container event-simulator, and that prints the relevant log messages.
+
+
+# Deployment strategies
+
+1. Recreate
+
+2. Rolling Update
+
+## Rollout and versioning
+
+  ```bash
+  # Check the rollout status of a daemonset
+  kubectl rollout status daemonset/foo
+
+  # Rollback to the previous deployment
+  kubectl rollout undo deployment/abc
+  
+  # Restart a deployment
+  kubectl rollout restart deployment/abc
+  
+  # Restart deployments with the 'app=nginx' label
+  kubectl rollout restart deployment --selector=app=nginx
+  ```
+
+There are two types of deployment strategies.
+
+Say for example, you have five replicas of your web application instance deployed. One way to upgrade these to a newer version is to destroy all of these and then create newer versions of application instances, meaning first, destroy the five running instances and then deploy five new instances of the new application version.
+
+The problem with this, as you can imagine, is that during the period after the older versions are down and before any newer version is up, the application is down and inaccessible to users.
+
+This strategy is known as the recreate strategy, and, thankfully, this is not the default deployment strategy.
+
+The second strategy is where we do not destroy all of them at once.
+
+Instead, we take down the older version and bring up a newer version one by one. This way, the application never goes down, and the upgrade is seamless.
+
+Remember, if you do not specify a strategy while creating the deployment, it will assume it to be rolling update. 
+
+In other words, rolling update is the default deployment strategy.
+
+
+For recreat the rs scales down the existing pod to 0 and new rs is deployed 
+
+while for rolling update the new rs scales up first and old one scales down
+
+
+# Configure Applications
+
+Configuring applications comprises of understanding the following concepts:
+
+  1. Configuring Command and Arguments on applications
+
+  2. Configuring Environment Variables
+
+  3. Configuring Secrets
+
+We will see these next
+
+
+
+# ConfigMaps
+
+A ConfigMap is an API object used to store non-confidential data in key-value pairs. Pods can consume ConfigMaps as environment variables, command-line arguments, or as configuration files in a volume.
+
+A ConfigMap allows you to decouple environment-specific configuration from your container images, so that your applications are easily portable.
+
+You can create them either with imperative or declarative ways
+
+Declarative using kubectl create cmd or imperative way using k apply pod-defenition.yaml
+
+```bash
+kubectl create configmap my-config --from-literal=key1=config1 --from-literal=key2=config2
+```
+If tou have multiple data point to store we can directly refer to the file
+```bash
+kubectl create configmap my-config --from-file=app_config.txt
+```
+
+## ConfigMaps and Pods
+You can write a Pod spec that refers to a ConfigMap and configures the container(s) in that Pod based on the data in the ConfigMap. The Pod and the ConfigMap must be in the same namespace.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: game-demo
+data:
+  # property-like keys; each key maps to a simple value
+  player_initial_lives: "3"
+  ui_properties_file_name: "user-interface.properties"
+
+  # file-like keys
+  game.properties: |
+    enemy.types=aliens,monsters
+    player.maximum-lives=5    
+  user-interface.properties: |
+    color.good=purple
+    color.bad=yellow
+```
+There are four different ways that you can use a ConfigMap to configure a container inside a Pod:
+
+  1. Inside a container command and args
+  1. Environment variables for a container
+  1. Add a file in read-only volume, for the application to read
+  1. Write code to run inside the Pod that uses the Kubernetes API to read a ConfigMap
+
+This is an example of a Pod that mounts a ConfigMap in a volume:
+
+These different methods lend themselves to different ways of modeling the data being consumed. For the first three methods, the kubelet uses the data from the ConfigMap when it launches container(s) for a Pod.
+
+The fourth method means you have to write code to read the ConfigMap and its data. However, because you're using the Kubernetes API directly, your application can subscribe to get updates whenever the ConfigMap changes, and react when that happens. By accessing the Kubernetes API directly, this technique also lets you access a ConfigMap in a different namespace.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: configmap-demo-pod
+spec:
+  containers:
+    - name: demo
+      image: alpine
+      command: ["sleep", "3600"]
+      env:
+        # Define the environment variable
+        - name: PLAYER_INITIAL_LIVES # Notice that the case is different here
+                                     # from the key name in the ConfigMap.
+          valueFrom:
+            configMapKeyRef:
+              name: game-demo           # The ConfigMap this value comes from.
+              key: player_initial_lives # The key to fetch.
+        - name: UI_PROPERTIES_FILE_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: game-demo
+              key: ui_properties_file_name
+      volumeMounts:
+      - name: config
+        mountPath: "/config"
+        readOnly: true
+  volumes:
+  # You set volumes at the Pod level, then mount them into containers inside that Pod
+  - name: config
+    configMap:
+      # Provide the name of the ConfigMap you want to mount.
+      name: game-demo
+      # An array of keys from the ConfigMap to create as files
+      items:
+      - key: "game.properties"
+        path: "game.properties"
+      - key: "user-interface.properties"
+        path: "user-interface.properties"
+```                
+A ConfigMap doesn't differentiate between single line property values and multi-line file-like values. What matters is how Pods and other objects consume those values.
+
+For this example, defining a volume and mounting it inside the demo container as /config creates two files, /config/game.properties and /config/user-interface.properties, even though there are four keys in the ConfigMap. This is because the Pod definition specifies an items array in the volumes section. If you omit the items array entirely, every key in the ConfigMap becomes a file with the same name as the key, and you get 4 files.
+
+## Using ConfigMaps
+
+ConfigMaps can be mounted as data volumes. ConfigMaps can also be used by other parts of the system, without being directly exposed to the Pod. For example, ConfigMaps can hold data that other parts of the system should use for configuration.
+
+The most common way to use ConfigMaps is to configure settings for containers running in a Pod in the same namespace. You can also use a ConfigMap separately.
+
+For example, you might encounter addons or operators that adjust their behavior based on a ConfigMap.
+Using ConfigMaps as files from a Pod
+
+To consume a ConfigMap in a volume in a Pod:
+
+  1. Create a ConfigMap or use an existing one. Multiple Pods can reference the same ConfigMap.
+  1. Modify your Pod definition to add a volume under .spec.volumes[]. Name the volume anything, and have a .spec.volumes[].configMap.name field set to reference your ConfigMap object.
+  1. Add a .spec.containers[].volumeMounts[] to each container that needs the ConfigMap. Specify .spec.containers[].volumeMounts[].readOnly = true and .spec.containers[].volumeMounts[].mountPath to an unused directory name where you would like the ConfigMap to appear.
+  1. Modify your image or command line so that the program looks for files in that directory. Each key in the ConfigMap data map becomes the filename under mountPath.
+
+Here's an example Pod that uses values from game-demo to configure a Pod:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mypod
+spec:
+  containers:
+  - name: mypod
+    image: redis
+    volumeMounts:
+    - name: foo
+      mountPath: "/etc/foo"
+      readOnly: true
+  volumes:
+  - name: foo
+    configMap:
+      name: myconfigmap
+```      
+Each ConfigMap you want to use needs to be referred to in .spec.volumes.
+
+If there are multiple containers in the Pod, then each container needs its own volumeMounts block, but only one .spec.volumes is needed per ConfigMap.
+
+### Mounted ConfigMaps are updated automatically
+
+When a ConfigMap currently consumed in a volume is updated, projected keys are eventually updated as well. The kubelet checks whether the mounted ConfigMap is fresh on every periodic sync. However, the kubelet uses its local cache for getting the current value of the ConfigMap. The type of the cache is configurable using the configMapAndSecretChangeDetectionStrategy field in the KubeletConfiguration struct. A ConfigMap can be either propagated by watch (default), ttl-based, or by redirecting all requests directly to the API server. As a result, the total delay from the moment when the ConfigMap is updated to the moment when new keys are projected to the Pod can be as long as the kubelet sync period + cache propagation delay, where the cache propagation delay depends on the chosen cache type (it equals to watch propagation delay, ttl of cache, or zero correspondingly).
+
+
+## ConfigMaps consumed as environment variables are not updated automatically and require a pod restart.
+
+
+### Using Configmaps as environment variables
+
+To use a Configmap in an environment variable in a Pod:
+
+  1. For each container in your Pod specification, add an environment variable for each Configmap key that you want to use to the env[].valueFrom.configMapKeyRef field.
+  2. **Modify your image and/or command line so that the program looks for values in the specified environment variables**.
+
+
+This is an example of defining a ConfigMap as a pod environment variable:
+
+The following ConfigMap (myconfigmap.yaml) stores two properties: username and access_level:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: myconfigmap
+data:
+  username: k8s-admin
+  access_level: "1"
+ ``` 
+The following command will create the ConfigMap object:
+
+```bash
+kubectl apply -f myconfigmap.yaml
+```
+
+The following Pod consumes the content of the ConfigMap as environment variables:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: env-configmap
+spec:
+  containers:
+    - name: app
+      command: ["/bin/sh", "-c", "printenv"]
+      image: busybox:latest
+      envFrom:
+        - configMapRef:
+            name: myconfigmap
+```
+The envFrom field instructs Kubernetes to create environment variables from the sources nested within it. The inner configMapRef refers to a ConfigMap by its name and selects all its key-value pairs. Add the Pod to your cluster, then retrieve its logs to see the output from the printenv command. This should confirm that the two key-value pairs from the ConfigMap have been set as environment variables:
+
+
+```bash
+kubectl apply -f env-configmap.yaml
+kubectl apply -f env-configmap.yaml
+```
+
+Sometimes a Pod won't require access to all the values in a ConfigMap. For example, you could have another Pod which only uses the username value from the ConfigMap. For this use case, you can use the env.valueFrom syntax instead, which lets you select individual keys in a ConfigMap. The name of the environment variable can also be different from the key within the ConfigMap. For example:
+
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: env-configmap
+spec:
+  containers:
+  - name: envars-test-container
+    image: nginx
+    env:
+    - name: CONFIGMAP_USERNAME
+      valueFrom:
+        configMapKeyRef:
+          name: myconfigmap
+          key: username
+```
+In the Pod created from this manifest, you will see that the environment variable CONFIGMAP_USERNAME is set to the value of the username value from the ConfigMap. Other keys from the ConfigMap data are not copied into the environment
+
+
+## Immutable ConfigMaps
+
+The Kubernetes feature Immutable Secrets and ConfigMaps provides an option to set individual Secrets and ConfigMaps as immutable. For clusters that extensively use ConfigMaps (at least tens of thousands of unique ConfigMap to Pod mounts), preventing changes to their data has the following advantages:
+
+  - protects you from accidental (or unwanted) updates that could cause applications outages
+  - improves performance of your cluster by significantly reducing load on kube-apiserver, by closing watches for ConfigMaps marked as immutable.
+
+You can create an immutable ConfigMap by setting the immutable field to true. For example:
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  ...
+data:
+  ...
+immutable: true
+
+Once a ConfigMap is marked as immutable, it is not possible to revert this change nor to mutate the contents of the data or the binaryData field. You can only delete and recreate the ConfigMap. Because existing Pods maintain a mount point to the deleted ConfigMap, it is recommended to recreate these pods.
